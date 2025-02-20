@@ -186,8 +186,6 @@ int main() {
     SDL_DestroyTexture(tex);
   }
 
-  SDL_CloseGamepad(gamepad);
-  SDL_free(joystickId);
   SDL_Quit();
   return 0;
 }
