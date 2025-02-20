@@ -1,5 +1,5 @@
 #include <SDL3/SDL.h>
-// #include <cstdio>
+#include <iostream>
 
 #define internal_fn static
 #define local_persist static
@@ -16,13 +16,19 @@ const int scale = 2;
 global_variable SDL_Window *window = NULL;
 global_variable SDL_Renderer *renderer = NULL;
 
+global_variable SDL_JoystickID *joystickId;
+global_variable SDL_Gamepad *gamepad;
+
 global_variable bool quit = false;
 
 global_variable Uint8 pixel_buff[buff_length] = {};
 
 global_variable SDL_Surface *surface;
 global_variable SDL_Texture *tex;
-global_variable SDL_FRect destR;
+global_variable SDL_FRect destR = (SDL_FRect){
+    .x = 0,
+    .y = 0,
+};
 
 internal_fn void update_pixels_alpha(Uint8 *pixelData, Uint8 alpha) {
   for (int i = 0; i < buff_length; i += BYTES_PER_PX) {
@@ -58,7 +64,7 @@ internal_fn void update_pixels_alpha(Uint8 *pixelData, Uint8 alpha) {
 
 int main() {
 
-  SDL_Init(SDL_INIT_VIDEO);
+  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
 
   SDL_CreateWindowAndRenderer("Hello SDL3", WIDTH * scale, HEIGHT * scale, 0,
                               &window, &renderer);
@@ -74,13 +80,18 @@ int main() {
 
   surface = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_RGBA8888);
 
-  destR.x = 0;
-  destR.y = 0;
   destR.w = WIDTH * scale;
   destR.h = HEIGHT * scale;
 
   // for testing animation
   local_persist Uint8 alpha = 0x00;
+
+  int nGamepads;
+
+  joystickId = SDL_GetGamepads(&nGamepads);
+  gamepad = SDL_OpenGamepad(*joystickId);
+
+  std::cout << ": Gamepads found: " << nGamepads << std::endl;
 
   while (!quit) {
 
@@ -88,11 +99,55 @@ int main() {
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_EVENT_QUIT)
         quit = true;
-      if (event.type == SDL_EVENT_KEY_DOWN)
-        if (event.key.key == SDLK_ESCAPE)
+      if (event.type == SDL_EVENT_KEY_DOWN) {
+
+        if (event.key.key == SDLK_ESCAPE) {
+          std::cout << "Keyboard Esc" << std::endl;
           quit = true;
+        }
+
+        if (event.key.key == SDLK_W)
+          std::cout << "Keyboard W" << std::endl;
+        if (event.key.key == SDLK_A)
+          std::cout << "Keyboard A" << std::endl;
+        if (event.key.key == SDLK_S)
+          std::cout << "Keyboard S" << std::endl;
+        if (event.key.key == SDLK_D)
+          std::cout << "Keyboard D" << std::endl;
+
+        if (event.key.key == SDLK_E)
+          std::cout << "Keyboard E" << std::endl;
+        if (event.key.key == SDLK_P)
+          std::cout << "Keyboard P" << std::endl;
+      }
+
+      if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
+          std::cout << "Gamepad Event: Start" << std::endl;
+          quit = true;
+        }
+
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
+          std::cout << "Gamepad Event: X" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)
+          std::cout << "Gamepad Event: B" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)
+          std::cout << "Gamepad Event: Y" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
+          std::cout << "Gamepad Event: A" << std::endl;
+
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_UP)
+          std::cout << "Gamepad Event: Up" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_DOWN)
+          std::cout << "Gamepad Event: Down" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_LEFT)
+          std::cout << "Gamepad Event: Left" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
+          std::cout << "Gamepad Event: Right" << std::endl;
+      }
+
       // if (event.type == SDL_EVENT_WINDOW_RESIZED)
-      //   printf("Window Resized\n");
+      //   std::cout << "Window Resized" << std::endl;
     }
 
     // for testing animation
@@ -118,6 +173,7 @@ int main() {
     SDL_DestroyTexture(tex);
   }
 
+  SDL_CloseGamepad(gamepad);
   SDL_Quit();
   return 0;
 }
