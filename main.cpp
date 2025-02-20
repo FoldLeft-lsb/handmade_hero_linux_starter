@@ -16,6 +16,8 @@ const int scale = 2;
 global_variable SDL_Window *window = NULL;
 global_variable SDL_Renderer *renderer = NULL;
 
+global_variable bool hasGamepad;
+global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
 global_variable SDL_Gamepad *gamepad;
 
@@ -86,68 +88,79 @@ int main() {
   // for testing animation
   local_persist Uint8 alpha = 0x00;
 
-  int nGamepads;
-
-  joystickId = SDL_GetGamepads(&nGamepads);
-  gamepad = SDL_OpenGamepad(*joystickId);
-
-  std::cout << ": Gamepads found: " << nGamepads << std::endl;
-
   while (!quit) {
 
     SDL_Event event = {};
     while (SDL_PollEvent(&event)) {
+      // Quit if told to
       if (event.type == SDL_EVENT_QUIT)
         quit = true;
+
+      if (event.type == SDL_EVENT_GAMEPAD_REMOVED)
+        std::cout << "Gamepad Removed" << std::endl;
+      // Open gamepad if connected
+      // This event fires if started with a gamepad available
+      if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
+        std::cout << "Gamepad Added" << std::endl;
+        joystickId = SDL_GetGamepads(&nGamepads);
+        gamepad = SDL_OpenGamepad(*joystickId);
+        std::cout << "Gamepads found: " << nGamepads << std::endl;
+      }
+
+      // Keyboard inputs
       if (event.type == SDL_EVENT_KEY_DOWN) {
 
         if (event.key.key == SDLK_ESCAPE) {
-          std::cout << "Keyboard Esc" << std::endl;
+          std::cout << "Keyboard: Esc" << std::endl;
           quit = true;
         }
 
         if (event.key.key == SDLK_W)
-          std::cout << "Keyboard W" << std::endl;
+          std::cout << "Keyboard: W" << std::endl;
         if (event.key.key == SDLK_A)
-          std::cout << "Keyboard A" << std::endl;
+          std::cout << "Keyboard: A" << std::endl;
         if (event.key.key == SDLK_S)
-          std::cout << "Keyboard S" << std::endl;
+          std::cout << "Keyboard: S" << std::endl;
         if (event.key.key == SDLK_D)
-          std::cout << "Keyboard D" << std::endl;
+          std::cout << "Keyboard: D" << std::endl;
 
         if (event.key.key == SDLK_E)
-          std::cout << "Keyboard E" << std::endl;
+          std::cout << "Keyboard: E" << std::endl;
         if (event.key.key == SDLK_P)
-          std::cout << "Keyboard P" << std::endl;
+          std::cout << "Keyboard: P" << std::endl;
       }
 
+      // Gamepad inputs
       if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
-          std::cout << "Gamepad Event: Start" << std::endl;
+          std::cout << "Gamepad: Start" << std::endl;
           quit = true;
         }
 
+        // I happen to have an xbox one controller
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
-          std::cout << "Gamepad Event: X" << std::endl;
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)
-          std::cout << "Gamepad Event: B" << std::endl;
+          std::cout << "Gamepad: X" << std::endl;
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)
-          std::cout << "Gamepad Event: Y" << std::endl;
+          std::cout << "Gamepad: Y" << std::endl;
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
-          std::cout << "Gamepad Event: A" << std::endl;
+          std::cout << "Gamepad: A" << std::endl;
+        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)
+          std::cout << "Gamepad: B" << std::endl;
 
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_UP)
-          std::cout << "Gamepad Event: Up" << std::endl;
+          std::cout << "Gamepad: Up" << std::endl;
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_DOWN)
-          std::cout << "Gamepad Event: Down" << std::endl;
+          std::cout << "Gamepad: Down" << std::endl;
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_LEFT)
-          std::cout << "Gamepad Event: Left" << std::endl;
+          std::cout << "Gamepad: Left" << std::endl;
         if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
-          std::cout << "Gamepad Event: Right" << std::endl;
+          std::cout << "Gamepad: Right" << std::endl;
       }
 
       // if (event.type == SDL_EVENT_WINDOW_RESIZED)
       //   std::cout << "Window Resized" << std::endl;
+      // Maybe change the scale or stretch the texture to the new screen size?
     }
 
     // for testing animation
@@ -174,6 +187,7 @@ int main() {
   }
 
   SDL_CloseGamepad(gamepad);
+  SDL_free(joystickId);
   SDL_Quit();
   return 0;
 }
