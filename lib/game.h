@@ -15,6 +15,11 @@
 #define local_persist static
 #define global_variable static
 
+// Handmade Hero used a void * for the buffer because
+// the size would change when the window is resized.
+// I haven't done that, it's just fixed size, instead
+// I intend to scale the texture that is generated from
+// the pixel buffer, may change that in future.
 typedef struct offscreen_buffer {
   int width;
   int height;

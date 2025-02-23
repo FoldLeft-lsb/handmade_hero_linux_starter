@@ -1,13 +1,16 @@
 default: 
 	clang++ \
 	-o main \
-	-lSDL3 \
 	-Wall \
-	linux_platform.cpp lib/*.cpp
+	linux_platform.cpp lib/*.cpp \
+	-Wl,-Bstatic -lSDL3 \
+	-Wl,-Bdynamic
+	
 
 release: 
 	clang++ \
 	-o main_release \
-	-lSDL3 \
 	-O1 \
-	linux_platform.cpp lib/*.cpp
+	linux_platform.cpp lib/*.cpp \
+	-Wl,-Bstatic -lSDL3 \
+	-Wl,-Bdynamic

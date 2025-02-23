@@ -88,10 +88,11 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
 
 // /IO
 
-// Should eliminate some of these globals
+// Should eliminate some or all of these globals
 
 global_variable int target_fps = 60;
 global_variable Uint64 target_frame_time = 1000 / target_fps;
+global_variable bool quit = false;
 
 const int scale = 1;
 
@@ -103,10 +104,10 @@ offscreen_buffer pixel_buffer =
                        .length = WIDTH * HEIGHT * BYTES_PER_PX,
                        .bytes_per_px = BYTES_PER_PX,
                        .buffer = {}};
+
 global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
 global_variable SDL_Gamepad *gamepad;
-global_variable bool quit = false;
 
 global_variable SDL_Surface *surface;
 global_variable SDL_Texture *tex;
@@ -122,12 +123,11 @@ int main() {
   game_memory_t game_memory = {};
   game_memory.permanent_storage_size = Megabytes(64);
   game_memory.transient_storage_size = Megabytes(512);
-  Uint64 total_storage_size =
-      game_memory.permanent_storage_size + game_memory.transient_storage_size;
 
-  game_memory.permanent_storage =
-      mmap(0, total_storage_size, PROT_READ | PROT_WRITE,
-           MAP_ANON | MAP_PRIVATE, -1, 0);
+  game_memory.permanent_storage = mmap(
+      0, // Do I need to start at 0? can be NULL to let OS decide
+      game_memory.permanent_storage_size + game_memory.transient_storage_size,
+      PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
   game_memory.transient_storage = (Uint8 *)(game_memory.permanent_storage) +
                                   game_memory.permanent_storage_size;
@@ -167,6 +167,10 @@ int main() {
         quit = true;
       if (event.type == SDL_EVENT_WINDOW_RESIZED)
         SDL_Log("Window Resized");
+
+      // I probably won't make my own abstraction for input
+      // because SDL is cross-platform, I'll just include
+      // it in my game code. Shouldn't be here though.
 
       if (event.type == SDL_EVENT_GAMEPAD_REMOVED)
         SDL_Log("Gamepad Removed");
