@@ -105,7 +105,7 @@ global_variable Uint64 target_physics_time = 1000 / target_physics_updates_ps;
 
 global_variable bool quit = false;
 
-const int scale = 1;
+const int scale = 2;
 
 offscreen_buffer pixel_buffer =
     (offscreen_buffer){.width = WIDTH,
@@ -289,20 +289,13 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
   }
 }
 
-void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_Surface *surface,
-                                SDL_FRect *destR, SDL_Texture *tex,
-                                offscreen_buffer *buffer) {
-  // Updated buffer overwrites to the surface
-  surface->pixels = buffer->buffer;
-
-  SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
+                                SDL_Texture *tex, offscreen_buffer *buffer) {
   destR->w = WIDTH * scale;
   destR->h = HEIGHT * scale;
 
-  // Allocate a new texture each frame which must be cleared
-  // Maybe should use SDL_UpdateTexture instead but requires
-  // computing pitch etc.
-  tex = SDL_CreateTextureFromSurface(renderer, surface);
+  SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
+                    buffer->width * buffer->bytes_per_px);
 
   SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
   SDL_RenderClear(renderer);
@@ -310,16 +303,12 @@ void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_Surface *surface,
   SDL_RenderTexture(renderer, tex, NULL, destR);
 
   SDL_RenderPresent(renderer);
-
-  // Clear the texture after drawing
-  SDL_DestroyTexture(tex);
 }
 
 int main(int argc, char *argv[]) {
 
   local_persist SDL_Window *window = NULL;
   local_persist SDL_Renderer *renderer = NULL;
-  local_persist SDL_Surface *surface;
   local_persist SDL_Texture *tex;
   local_persist SDL_FRect destR = (SDL_FRect){
       .x = 0,
@@ -347,7 +336,9 @@ int main(int argc, char *argv[]) {
   SDL_CreateWindowAndRenderer("Hello SDL3", WIDTH * scale, HEIGHT * scale, 0,
                               &window, &renderer);
   SDL_SetWindowResizable(window, true);
-  surface = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_RGBA8888);
+
+  tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                          SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
 
   game_init(&game_memory, &pixel_buffer);
 
@@ -414,7 +405,7 @@ int main(int argc, char *argv[]) {
     }
 
     // // == DRAW ==
-    PlatformUpdateAndDrawFrame(renderer, surface, &destR, tex, &pixel_buffer);
+    PlatformUpdateAndDrawFrame(renderer, &destR, tex, &pixel_buffer);
     // // == END DRAW ==
 
     // // == UPDATE ==
