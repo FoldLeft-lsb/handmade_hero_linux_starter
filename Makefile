@@ -1,16 +1,16 @@
 default: 
-	clang++ \
+	clang++ -std=c++20 \
 	-o main \
 	-Wall \
-	linux_platform.cpp lib/*.cpp \
+	linux_platform.cpp \
 	-Wl,-Bstatic -lSDL3 \
 	-Wl,-Bdynamic
 	
 
 release: 
-	clang++ \
+	clang++ -std=c++20 \
 	-o main_release \
 	-O1 \
-	linux_platform.cpp lib/*.cpp \
+	linux_platform.cpp \
 	-Wl,-Bstatic -lSDL3 \
 	-Wl,-Bdynamic

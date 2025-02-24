@@ -39,7 +39,7 @@ void game_init(game_memory_t *memory, offscreen_buffer *buff) {
 };
 
 void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
-                            float delta_time) {
+                            game_input_t *input, float delta_time) {
 
   game_state_t *state = (game_state_t *)memory->permanent_storage;
   if (!memory->is_initialized) {
@@ -70,6 +70,22 @@ void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
     // // File IO worked correctly in manual testing
   }
 
-  state->alpha++;
+  // // Testing input abstraction
+
+  // if (input->move_north.half_transition_count > 0) {
+  //   printf("Key Is Analog: %s\n", input->is_analog ? "Yes" : "No");
+  //   printf("Key Move North: %s\n",
+  //          input->move_north.ended_down ? "down" : "up");
+  //   printf("Key Move North: %d\n", input->move_north.half_transition_count);
+  // }
+
+  if (input->move_north.ended_down) {
+    state->alpha++;
+  } else if (input->move_south.ended_down) {
+    state->alpha--;
+  }
+
+  // state->alpha++;
+
   game_update_pixels_alpha(buff, state->alpha);
 };

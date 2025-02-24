@@ -15,6 +15,8 @@
 #define local_persist static
 #define global_variable static
 
+#define array_length(arr) (sizeof(arr)) / (sizeof(arr[0]))
+
 // Handmade Hero used a void * for the buffer because
 // the size would change when the window is resized.
 // I haven't done that, it's just fixed size, instead
@@ -27,6 +29,38 @@ typedef struct offscreen_buffer {
   int bytes_per_px;
   Uint8 buffer[WIDTH * HEIGHT * BYTES_PER_PX];
 } offscreen_buffer;
+
+typedef struct game_button_state {
+  int half_transition_count;
+  bool ended_down;
+} game_button_state_t;
+
+typedef struct game_input {
+  float left_stick_average_x;
+  float left_stick_average_y;
+  bool is_analog;
+
+  union {
+    game_button_state_t buttons[12];
+    struct {
+      game_button_state_t move_north;
+      game_button_state_t move_south;
+      game_button_state_t move_west;
+      game_button_state_t move_east;
+
+      game_button_state_t action_north;
+      game_button_state_t action_south;
+      game_button_state_t action_west;
+      game_button_state_t action_east;
+
+      game_button_state_t left_shoulder;
+      game_button_state_t right_shoulder;
+
+      game_button_state_t start;
+      game_button_state_t select;
+    };
+  };
+} game_input_t;
 
 typedef struct game_state {
   Uint8 alpha;
@@ -45,7 +79,7 @@ typedef struct game_memory {
 
 void game_init(game_memory_t *memory, offscreen_buffer *buff);
 void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
-                            float delta_time);
+                            game_input_t *input, float delta_time);
 
 // Platform layer implements these
 

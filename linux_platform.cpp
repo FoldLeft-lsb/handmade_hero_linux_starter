@@ -1,20 +1,28 @@
+#include "lib/game.cpp"
 #include "lib/game.h"
 
 #include <SDL3/SDL.h>
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-// IO
+// NOTE: Handmade Hero does sound from a buffer
+// I couldn't figure it out with SDL3 so I haven't.
+// Either I will figure it out, or just use SDL later
+// without managing the buffer myself.
+
+// File IO
 // These functions are defined in game.h
 // and implemented here, part of the platform
 // layer that is accessible within the game.
 // Is that OK? I don't know lol
 
 inline Uint32 SafeTruncateUInt64(Uint64 value) {
+  // assert
   Uint32 result = (Uint32)value;
   return (result);
 }
@@ -86,18 +94,19 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
   return true;
 };
 
-// /IO
+// End File IO
 
 // Should eliminate some or all of these globals
 
 global_variable int target_fps = 60;
 global_variable Uint64 target_frame_time = 1000 / target_fps;
+global_variable int target_physics_updates_ps = 30;
+global_variable Uint64 target_physics_time = 1000 / target_physics_updates_ps;
+
 global_variable bool quit = false;
 
 const int scale = 1;
 
-global_variable SDL_Window *window = NULL;
-global_variable SDL_Renderer *renderer = NULL;
 offscreen_buffer pixel_buffer =
     (offscreen_buffer){.width = WIDTH,
                        .height = HEIGHT,
@@ -108,17 +117,214 @@ offscreen_buffer pixel_buffer =
 global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
 global_variable SDL_Gamepad *gamepad;
-
-global_variable SDL_Surface *surface;
-global_variable SDL_Texture *tex;
-global_variable SDL_FRect destR = (SDL_FRect){
-    .x = 0,
-    .y = 0,
-};
+global_variable int left_stick_deadzone = 9000;
+global_variable int right_stick_deadzone = 8000;
 
 // /globals
 
-int main() {
+internal_fn void PlatformHandleInputButton(game_button_state_t *new_state,
+                                           bool value) {
+  new_state->ended_down = value;
+  new_state->half_transition_count++;
+}
+
+internal_fn void PlatformHandleGamepadButton(game_button_state_t *old_state,
+                                             game_button_state_t *new_state,
+                                             bool value) {
+  new_state->ended_down = value;
+  new_state->half_transition_count +=
+      ((new_state->ended_down == old_state->ended_down) ? 0 : 1);
+}
+
+internal_fn float PlatformGetGamepadAxisValue(int16_t value, int16_t deadzone) {
+  float result = 0;
+  if (value < -deadzone) {
+    result = (float)((value + deadzone) / (32768.0f - deadzone));
+  } else if (value > deadzone) {
+    result = (float)((value - deadzone) / (32767.0f - deadzone));
+  }
+  return result;
+}
+
+internal_fn void PlatformHandleInputEvent(SDL_Event *event,
+                                          game_input_t *new_input,
+                                          game_input_t *old_input) {
+  // Keyboard inputs
+  if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
+
+    if (event->key.key == SDLK_ESCAPE) {
+      SDL_Log("Keyboard: Esc");
+      quit = true;
+    }
+
+    if (event->key.repeat == 0) {
+      if (event->key.key == SDLK_W) {
+        PlatformHandleInputButton(&new_input->move_north, event->key.down);
+      }
+      if (event->key.key == SDLK_A) {
+        PlatformHandleInputButton(&new_input->move_west, event->key.down);
+      }
+      if (event->key.key == SDLK_S) {
+        PlatformHandleInputButton(&new_input->move_south, event->key.down);
+      }
+      if (event->key.key == SDLK_D) {
+        PlatformHandleInputButton(&new_input->move_east, event->key.down);
+      }
+      if (event->key.key == SDLK_UP) {
+        PlatformHandleInputButton(&new_input->move_north, event->key.down);
+      }
+      if (event->key.key == SDLK_LEFT) {
+        PlatformHandleInputButton(&new_input->move_west, event->key.down);
+      }
+      if (event->key.key == SDLK_DOWN) {
+        PlatformHandleInputButton(&new_input->move_south, event->key.down);
+      }
+      if (event->key.key == SDLK_RIGHT) {
+        PlatformHandleInputButton(&new_input->move_east, event->key.down);
+      }
+
+      if (event->key.key == SDLK_E) {
+        PlatformHandleInputButton(&new_input->action_south, event->key.down);
+      }
+      if (event->key.key == SDLK_F) {
+        PlatformHandleInputButton(&new_input->action_east, event->key.down);
+      }
+      if (event->key.key == SDLK_Q) {
+        PlatformHandleInputButton(&new_input->action_west, event->key.down);
+      }
+      if (event->key.key == SDLK_R) {
+        PlatformHandleInputButton(&new_input->action_north, event->key.down);
+      }
+
+      if (event->key.key == SDLK_LSHIFT) {
+        PlatformHandleInputButton(&new_input->left_shoulder, event->key.down);
+      }
+      if (event->key.key == SDLK_LCTRL) {
+        PlatformHandleInputButton(&new_input->right_shoulder, event->key.down);
+      }
+
+      if (event->key.key == SDLK_P) {
+        PlatformHandleInputButton(&new_input->start, event->key.down);
+      }
+      if (event->key.key == SDLK_I) {
+        PlatformHandleInputButton(&new_input->select, event->key.down);
+      }
+    }
+  }
+
+  // Gamepad inputs
+  if (event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+    if (event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX ||
+        event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
+
+      new_input->is_analog = true;
+
+      new_input->left_stick_average_x =
+          PlatformGetGamepadAxisValue(event->gaxis.value, left_stick_deadzone);
+      new_input->left_stick_average_y =
+          PlatformGetGamepadAxisValue(event->gaxis.value, left_stick_deadzone);
+
+      float threshold = 0.5f;
+      PlatformHandleGamepadButton(&old_input->move_west, &new_input->move_west,
+                                  new_input->left_stick_average_x < -threshold);
+      PlatformHandleGamepadButton(&old_input->move_east, &new_input->move_east,
+                                  new_input->left_stick_average_x > threshold);
+      PlatformHandleGamepadButton(&old_input->move_north,
+                                  &new_input->move_north,
+                                  new_input->left_stick_average_y < -threshold);
+      PlatformHandleGamepadButton(&old_input->move_south,
+                                  &new_input->move_south,
+                                  new_input->left_stick_average_y > threshold);
+    }
+  }
+
+  if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+      event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) {
+
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
+      PlatformHandleInputButton(&new_input->start, event->gbutton.down);
+      quit = true;
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
+      PlatformHandleInputButton(&new_input->select, event->gbutton.down);
+    }
+
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
+      PlatformHandleInputButton(&new_input->left_shoulder, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+      PlatformHandleInputButton(&new_input->right_shoulder,
+                                event->gbutton.down);
+    }
+
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
+      PlatformHandleInputButton(&new_input->action_west, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
+      PlatformHandleInputButton(&new_input->action_north, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+      PlatformHandleInputButton(&new_input->action_south, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
+      PlatformHandleInputButton(&new_input->action_east, event->gbutton.down);
+    }
+
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_UP) {
+      new_input->is_analog = false;
+      PlatformHandleInputButton(&new_input->move_north, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+      new_input->is_analog = false;
+      PlatformHandleInputButton(&new_input->move_south, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
+      new_input->is_analog = false;
+      PlatformHandleInputButton(&new_input->move_west, event->gbutton.down);
+    }
+    if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+      new_input->is_analog = false;
+      PlatformHandleInputButton(&new_input->move_east, event->gbutton.down);
+    }
+  }
+}
+
+void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_Surface *surface,
+                                SDL_FRect *destR, SDL_Texture *tex,
+                                offscreen_buffer *buffer) {
+  // Updated buffer overwrites to the surface
+  surface->pixels = buffer->buffer;
+
+  SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+  destR->w = WIDTH * scale;
+  destR->h = HEIGHT * scale;
+
+  // Allocate a new texture each frame which must be cleared
+  // Maybe should use SDL_UpdateTexture instead but requires
+  // computing pitch etc.
+  tex = SDL_CreateTextureFromSurface(renderer, surface);
+
+  SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
+  SDL_RenderClear(renderer);
+
+  SDL_RenderTexture(renderer, tex, NULL, destR);
+
+  SDL_RenderPresent(renderer);
+
+  // Clear the texture after drawing
+  SDL_DestroyTexture(tex);
+}
+
+int main(int argc, char *argv[]) {
+
+  local_persist SDL_Window *window = NULL;
+  local_persist SDL_Renderer *renderer = NULL;
+  local_persist SDL_Surface *surface;
+  local_persist SDL_Texture *tex;
+  local_persist SDL_FRect destR = (SDL_FRect){
+      .x = 0,
+      .y = 0,
+  };
 
   game_memory_t game_memory = {};
   game_memory.permanent_storage_size = Megabytes(64);
@@ -131,7 +337,6 @@ int main() {
 
   game_memory.transient_storage = (Uint8 *)(game_memory.permanent_storage) +
                                   game_memory.permanent_storage_size;
-
   if (game_memory.permanent_storage == NULL ||
       game_memory.transient_storage == NULL) {
     SDL_LogError(SDL_LOG_CATEGORY_SYSTEM, "Unable to allocate memory");
@@ -139,43 +344,65 @@ int main() {
   }
 
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
-
   SDL_CreateWindowAndRenderer("Hello SDL3", WIDTH * scale, HEIGHT * scale, 0,
                               &window, &renderer);
   SDL_SetWindowResizable(window, true);
+  surface = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_RGBA8888);
 
   game_init(&game_memory, &pixel_buffer);
 
-  surface = SDL_CreateSurface(WIDTH, HEIGHT, SDL_PIXELFORMAT_RGBA8888);
+  // float highestRate = 0.0f;
+  // int nDisplays;
+  // SDL_DisplayID *displays = SDL_GetDisplays(&nDisplays);
+  // for (int di = 0; di < nDisplays; di++) {
+  //   int nModes;
+  //   SDL_DisplayMode **displayModes =
+  //       SDL_GetFullscreenDisplayModes(displays[di], &nModes);
+  //   for (int mi = 0; mi < nModes; mi++) {
+  //     float rate = (*displayModes)[mi].refresh_rate;
+  //     if (rate > highestRate)
+  //       highestRate = rate;
+  //   }
+  //   SDL_free(displayModes);
+  // }
+  // SDL_Log("Highest available rate: %f", highestRate);
+  // SDL_free(displays);
 
   local_persist Uint64 last_tick;
   local_persist Uint64 current_tick;
   local_persist float delta_time;
 
-  // Game loop
-  while (!quit) {
+  local_persist game_input_t input[2] = {};
+  local_persist game_input_t *new_input = &input[0];
+  local_persist game_input_t *old_input = &input[1];
 
+  while (!quit) {
     last_tick = current_tick;
     current_tick = SDL_GetTicks();
     delta_time = (current_tick - last_tick) / 1000.0f;
 
+    *new_input = {};
+    for (int button_i = 0; button_i < array_length(new_input->buttons);
+         button_i++) {
+      new_input->buttons[button_i].ended_down =
+          old_input->buttons[button_i].ended_down;
+    }
+
     SDL_Event event = {};
     while (SDL_PollEvent(&event)) {
 
-      // Quit if told to
-      if (event.type == SDL_EVENT_QUIT)
+      if (event.type == SDL_EVENT_QUIT) {
+        // Quit if told to
         quit = true;
-      if (event.type == SDL_EVENT_WINDOW_RESIZED)
+      }
+      if (event.type == SDL_EVENT_WINDOW_RESIZED) {
         SDL_Log("Window Resized");
+      }
 
-      // I probably won't make my own abstraction for input
-      // because SDL is cross-platform, I'll just include
-      // it in my game code. Shouldn't be here though.
-
-      if (event.type == SDL_EVENT_GAMEPAD_REMOVED)
+      if (event.type == SDL_EVENT_GAMEPAD_REMOVED) {
         SDL_Log("Gamepad Removed");
-      // Open gamepad if connected
-      // This event fires if started with a gamepad available
+      }
+
       if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
         SDL_Log("Gamepad Added");
         joystickId = SDL_GetGamepads(&nGamepads);
@@ -183,90 +410,35 @@ int main() {
         SDL_Log("Gamepad Added %i", nGamepads);
       }
 
-      // Keyboard inputs
-      if (event.type == SDL_EVENT_KEY_DOWN) {
-
-        if (event.key.key == SDLK_ESCAPE) {
-          SDL_Log("Keyboard: Esc");
-          quit = true;
-        }
-
-        if (event.key.key == SDLK_W)
-          SDL_Log("Keyboard: W");
-        if (event.key.key == SDLK_A)
-          SDL_Log("Keyboard: A");
-        if (event.key.key == SDLK_S)
-          SDL_Log("Keyboard: S");
-        if (event.key.key == SDLK_D)
-          SDL_Log("Keyboard: D");
-
-        if (event.key.key == SDLK_E)
-          SDL_Log("Keyboard: E");
-        if (event.key.key == SDLK_P)
-          SDL_Log("Keyboard: P");
-      }
-
-      // Gamepad inputs
-      if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
-          SDL_Log("Gamepad: Start");
-          quit = true;
-        }
-
-        // I happen to have an xbox one controller
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
-          SDL_Log("Gamepad: X");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)
-          SDL_Log("Gamepad: Y");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
-          SDL_Log("Gamepad: A");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)
-          SDL_Log("Gamepad: B");
-
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_UP)
-          SDL_Log("Gamepad: Up");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_DOWN)
-          SDL_Log("Gamepad: Down");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_LEFT)
-          SDL_Log("Gamepad: Left");
-        if (event.gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
-          SDL_Log("Gamepad: Right");
-      }
+      PlatformHandleInputEvent(&event, new_input, old_input);
     }
 
-    // Updated buffer overwrites to the surface
-    surface->pixels = pixel_buffer.buffer;
+    // // == DRAW ==
+    PlatformUpdateAndDrawFrame(renderer, surface, &destR, tex, &pixel_buffer);
+    // // == END DRAW ==
 
-    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-    destR.w = WIDTH * scale;
-    destR.h = HEIGHT * scale;
+    // // == UPDATE ==
+    // // I don't think is the the correct way to do physics ticks
+    // if ((SDL_GetTicks() - current_tick) < target_physics_time) {
+    game_update_and_render(&game_memory, &pixel_buffer, new_input, delta_time);
 
-    // Allocate a new texture each frame which must be cleared
-    // Maybe should use SDL_UpdateTexture instead but requires
-    // computing pitch etc.
-    tex = SDL_CreateTextureFromSurface(renderer, surface);
+    game_input_t *temp_input_ptr = new_input;
+    new_input = old_input;
+    old_input = temp_input_ptr;
 
-    SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
-    SDL_RenderClear(renderer);
-
-    SDL_RenderTexture(renderer, tex, NULL, &destR);
-
-    SDL_RenderPresent(renderer);
-
-    // Clear the texture after drawing
-    SDL_DestroyTexture(tex);
-
-    // == UPDATE ==
-    game_update_and_render(&game_memory, &pixel_buffer, delta_time);
-    // == END UPDATE ==
+    // }
+    // // == END UPDATE ==
 
     // Limit fps
     Uint64 frame_time = SDL_GetTicks() - current_tick;
-    if (frame_time < target_frame_time)
+    if (frame_time < target_frame_time) {
       SDL_Delay(target_frame_time - frame_time);
+    } else {
+      // Missed framerate
+      SDL_Log("Failed to hit framerate");
+    }
 
-  } // End loop
+  } // End game loop
 
   SDL_Quit();
   return 0;
