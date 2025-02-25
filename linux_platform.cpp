@@ -1,14 +1,77 @@
-#include "lib/game.cpp"
 #include "lib/game.h"
 
 #include <SDL3/SDL.h>
 
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_surface.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+game_init_t(*game_init_ptr) = NULL;
+game_update_and_render_t(*game_update_and_render_ptr) = NULL;
+
+void *game_lib_handle;
+const char *game_lib_name = "./lib/libgame.so";
+
+internal_fn void PlatformLoadGameCodeLib() {
+
+  char *error;
+
+  game_lib_handle = dlopen(game_lib_name, RTLD_NOW);
+  if (!game_lib_handle) {
+    fputs(dlerror(), stderr);
+    printf(" line %d\n", __LINE__);
+    exit(1);
+  }
+
+  *(void **)(&game_init_ptr) = dlsym(game_lib_handle, "game_init");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    printf(" line %d\n", __LINE__);
+  }
+  *(void **)(&game_update_and_render_ptr) =
+      dlsym(game_lib_handle, "game_update_and_render");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    printf(" line %d\n", __LINE__);
+    exit(1);
+  }
+
+  printf("Loaded game code from shared object\n");
+}
+
+internal_fn void PlatformReloadGameCodeLib() {
+  char *error;
+
+  dlclose(game_lib_handle);
+  game_lib_handle = dlopen(game_lib_name, RTLD_NOW);
+  if (!game_lib_handle) {
+    fputs(dlerror(), stderr);
+    printf(" line %d\n", __LINE__);
+    exit(1);
+  }
+
+  *(void **)(&game_init_ptr) = dlsym(game_lib_handle, "game_init");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    printf(" line %d\n", __LINE__);
+  }
+  *(void **)(&game_update_and_render_ptr) =
+      dlsym(game_lib_handle, "game_update_and_render");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    printf(" line %d\n", __LINE__);
+    exit(1);
+  }
+
+  printf("Reloaded game code from shared object\n");
+}
 
 // NOTE: Handmade Hero does sound from a buffer
 // I couldn't figure it out with SDL3 so I haven't.
@@ -21,14 +84,14 @@
 // layer that is accessible within the game.
 // Is that OK? I don't know lol
 
-inline Uint32 SafeTruncateUInt64(Uint64 value) {
+Uint32 SafeTruncateUInt64(Uint64 value) {
   // assert
   Uint32 result = (Uint32)value;
   return (result);
 }
 
-debug_read_file_result DEBUGPlatformReadEntireFile(char *filename) {
-  debug_read_file_result result = {};
+debug_read_file_result_t DEBUGPlatformReadEntireFile(char *filename) {
+  debug_read_file_result_t result = {};
 
   int file_handle = open(filename, O_RDONLY);
   if (file_handle == -1) {
@@ -98,10 +161,10 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
 
 // Should eliminate some or all of these globals
 
-global_variable int target_fps = 60;
-global_variable Uint64 target_frame_time = 1000 / target_fps;
-global_variable int target_physics_updates_ps = 30;
-global_variable Uint64 target_physics_time = 1000 / target_physics_updates_ps;
+global_variable int target_fps;
+global_variable Uint64 target_frame_time;
+global_variable int target_physics_updates_ps;
+global_variable Uint64 target_physics_time;
 
 global_variable bool quit = false;
 
@@ -112,13 +175,22 @@ offscreen_buffer pixel_buffer =
                        .height = HEIGHT,
                        .length = WIDTH * HEIGHT * BYTES_PER_PX,
                        .bytes_per_px = BYTES_PER_PX,
-                       .buffer = {}};
+                       .buffer = {0}};
 
 global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
 global_variable SDL_Gamepad *gamepad;
 global_variable int left_stick_deadzone = 9000;
 global_variable int right_stick_deadzone = 8000;
+
+global_variable SDL_Window *window = NULL;
+global_variable SDL_Renderer *renderer = NULL;
+global_variable SDL_Surface *surface = NULL;
+global_variable SDL_Texture *tex = NULL;
+global_variable SDL_FRect destR = (SDL_FRect){
+    .x = 0,
+    .y = 0,
+};
 
 // /globals
 
@@ -158,6 +230,11 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
     }
 
     if (event->key.repeat == 0) {
+      if (event->key.key == SDLK_F5 && event->key.down) {
+        SDL_Log("Keyboard: F5");
+        PlatformReloadGameCodeLib();
+      }
+
       if (event->key.key == SDLK_W) {
         PlatformHandleInputButton(&new_input->move_north, event->key.down);
       }
@@ -289,31 +366,38 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
   }
 }
 
-void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
-                                SDL_Texture *tex, offscreen_buffer *buffer) {
-  destR->w = WIDTH * scale;
-  destR->h = HEIGHT * scale;
+// void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
+//                                 SDL_Texture *tex, offscreen_buffer *buffer) {
+// void PlatformUpdateAndDrawFrame() {
 
-  SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
-                    buffer->width * buffer->bytes_per_px);
+//   surface->pixels = pixel_buffer.buffer;
 
-  SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
-  SDL_RenderClear(renderer);
+//   destR.w = pixel_buffer.width * scale;
+//   destR.h = pixel_buffer.height * scale;
 
-  SDL_RenderTexture(renderer, tex, NULL, destR);
+//   // SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
+//   //                   buffer->width * buffer->bytes_per_px);
 
-  SDL_RenderPresent(renderer);
-}
+//   tex = SDL_CreateTextureFromSurface(renderer, surface);
+
+//   SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
+//   SDL_RenderClear(renderer);
+
+//   SDL_RenderTexture(renderer, tex, NULL, &destR);
+
+//   SDL_RenderPresent(renderer);
+
+//   SDL_DestroyTexture(tex);
+// }
 
 int main(int argc, char *argv[]) {
 
-  local_persist SDL_Window *window = NULL;
-  local_persist SDL_Renderer *renderer = NULL;
-  local_persist SDL_Texture *tex;
-  local_persist SDL_FRect destR = (SDL_FRect){
-      .x = 0,
-      .y = 0,
-  };
+  PlatformLoadGameCodeLib();
+
+  target_fps = 60;
+  target_frame_time = 1000 / target_fps;
+  target_physics_updates_ps = 30;
+  target_physics_time = 1000 / target_physics_updates_ps;
 
   game_memory_t game_memory = {};
   game_memory.permanent_storage_size = Megabytes(64);
@@ -337,10 +421,31 @@ int main(int argc, char *argv[]) {
                               &window, &renderer);
   SDL_SetWindowResizable(window, true);
 
-  tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                          SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
+  surface = SDL_CreateSurface(pixel_buffer.width, pixel_buffer.height,
+                              SDL_PIXELFORMAT_RGBA8888);
+  // tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+  //                         SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
+  // tex = SDL_CreateTextureFromSurface(renderer, surface);
 
-  game_init(&game_memory, &pixel_buffer);
+  // SDL_Log("Checking game_init_ptr %p", game_init_ptr);
+  if (game_init_ptr == NULL) {
+    printf("game_init_ptr is NULL\n");
+    exit(1);
+  }
+  // SDL_Log("Checking game_update_and_render_ptr %p",
+  // game_update_and_render_ptr);
+  if (game_update_and_render_ptr == NULL) {
+    printf("game_update_and_render_ptr is NULL\n");
+    exit(1);
+  }
+
+  SDL_Log("Attempting init");
+
+  (*game_init_ptr)(&game_memory, &pixel_buffer);
+
+  SDL_Log("Made it past init");
+
+  // game_init(&game_memory, &pixel_buffer);
 
   // float highestRate = 0.0f;
   // int nDisplays;
@@ -368,6 +473,12 @@ int main(int argc, char *argv[]) {
   local_persist game_input_t *old_input = &input[1];
 
   while (!quit) {
+
+    if (game_update_and_render_ptr == NULL) {
+      printf("game_update_and_render_ptr is NULL\n");
+      exit(1);
+    }
+
     last_tick = current_tick;
     current_tick = SDL_GetTicks();
     delta_time = (current_tick - last_tick) / 1000.0f;
@@ -405,13 +516,42 @@ int main(int argc, char *argv[]) {
     }
 
     // // == DRAW ==
-    PlatformUpdateAndDrawFrame(renderer, &destR, tex, &pixel_buffer);
+
+    // PlatformUpdateAndDrawFrame(renderer, &destR, tex, surface,
+    // &pixel_buffer);
+
+    // PlatformUpdateAndDrawFrame();
+
+    surface->pixels = pixel_buffer.buffer;
+
+    destR.w = pixel_buffer.width * scale;
+    destR.h = pixel_buffer.height * scale;
+
+    // SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
+    //                   buffer->width * buffer->bytes_per_px);
+
+    tex = SDL_CreateTextureFromSurface(renderer, surface);
+
+    SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
+    SDL_RenderClear(renderer);
+
+    SDL_RenderTexture(renderer, tex, NULL, &destR);
+
+    SDL_RenderPresent(renderer);
+
+    SDL_DestroyTexture(tex);
+
     // // == END DRAW ==
 
     // // == UPDATE ==
     // // I don't think is the the correct way to do physics ticks
     // if ((SDL_GetTicks() - current_tick) < target_physics_time) {
-    game_update_and_render(&game_memory, &pixel_buffer, new_input, delta_time);
+
+    (*game_update_and_render_ptr)(&game_memory, &pixel_buffer, new_input,
+                                  delta_time);
+
+    // game_update_and_render(&game_memory, &pixel_buffer, new_input,
+    // delta_time);
 
     game_input_t *temp_input_ptr = new_input;
     new_input = old_input;
@@ -422,6 +562,10 @@ int main(int argc, char *argv[]) {
 
     // Limit fps
     Uint64 frame_time = SDL_GetTicks() - current_tick;
+
+    if (frame_time > 12)
+      SDL_Log("target: %ld, time: %ld", target_frame_time, frame_time);
+
     if (frame_time < target_frame_time) {
       SDL_Delay(target_frame_time - frame_time);
     } else {

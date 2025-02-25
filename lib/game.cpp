@@ -34,12 +34,13 @@ internal_fn void game_update_pixels_alpha(offscreen_buffer *buff, Uint8 alpha) {
   }
 }
 
-void game_init(game_memory_t *memory, offscreen_buffer *buff) {
+extern "C" void game_init(game_memory_t *memory, offscreen_buffer *buff) {
   game_init_pixels(buff);
 };
 
-void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
-                            game_input_t *input, float delta_time) {
+extern "C" void game_update_and_render(game_memory_t *memory,
+                                       offscreen_buffer *buff,
+                                       game_input_t *input, float delta_time) {
 
   game_state_t *state = (game_state_t *)memory->permanent_storage;
   if (!memory->is_initialized) {
@@ -85,7 +86,7 @@ void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
     state->alpha--;
   }
 
-  // state->alpha++;
+  state->alpha++;
 
   game_update_pixels_alpha(buff, state->alpha);
 };

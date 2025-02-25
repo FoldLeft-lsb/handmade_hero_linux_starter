@@ -77,17 +77,19 @@ typedef struct game_memory {
 
 } game_memory_t;
 
-void game_init(game_memory_t *memory, offscreen_buffer *buff);
-void game_update_and_render(game_memory_t *memory, offscreen_buffer *buff,
-                            game_input_t *input, float delta_time);
+typedef void game_init_t(game_memory_t *memory, offscreen_buffer *buff);
+typedef void game_update_and_render_t(game_memory_t *memory,
+                                      offscreen_buffer *buff,
+                                      game_input_t *input, float delta_time);
 
 // Platform layer implements these
 
-struct debug_read_file_result {
+typedef struct debug_read_file_result {
   Uint32 contents_size;
   void *contents;
-};
-debug_read_file_result DEBUGPlatformReadEntireFile(char *filename);
+} debug_read_file_result_t;
+
+debug_read_file_result_t DEBUGPlatformReadEntireFile(char *filename);
 void DEBUGPlatformFreeFileMemory(void *memory);
 bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
                                   void *memory);
