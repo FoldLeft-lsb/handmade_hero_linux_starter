@@ -17,11 +17,6 @@
 
 #define array_length(arr) (sizeof(arr)) / (sizeof(arr[0]))
 
-// Handmade Hero used a void * for the buffer because
-// the size would change when the window is resized.
-// I haven't done that, it's just fixed size, instead
-// I intend to scale the texture that is generated from
-// the pixel buffer, may change that in future.
 typedef struct offscreen_buffer {
   int width;
   int height;
@@ -82,7 +77,7 @@ typedef void game_update_and_render_t(game_memory_t *memory,
                                       offscreen_buffer *buff,
                                       game_input_t *input, float delta_time);
 
-// Platform layer implements these
+// Platform layer File IO
 
 typedef struct debug_read_file_result {
   Uint32 contents_size;

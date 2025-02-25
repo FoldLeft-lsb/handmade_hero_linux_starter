@@ -3,7 +3,6 @@
 
 internal_fn void game_init_pixels(offscreen_buffer *buff) {
   for (int i = 0; i < buff->length; i++) {
-    // for testing
     if (i % buff->bytes_per_px == 0) {
       // init Red
       buff->buffer[i] = 0xFF;
@@ -70,15 +69,6 @@ extern "C" void game_update_and_render(game_memory_t *memory,
 
     // // File IO worked correctly in manual testing
   }
-
-  // // Testing input abstraction
-
-  // if (input->move_north.half_transition_count > 0) {
-  //   printf("Key Is Analog: %s\n", input->is_analog ? "Yes" : "No");
-  //   printf("Key Move North: %s\n",
-  //          input->move_north.ended_down ? "down" : "up");
-  //   printf("Key Move North: %d\n", input->move_north.half_transition_count);
-  // }
 
   if (input->move_north.ended_down) {
     state->alpha++;

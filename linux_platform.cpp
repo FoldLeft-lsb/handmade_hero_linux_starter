@@ -2,8 +2,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <SDL3/SDL_render.h>
-#include <SDL3/SDL_surface.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -12,6 +10,12 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#if STATIC_WHOLE_COMPILE
+
+#include "lib/game.cpp"
+
+#else
 
 game_init_t(*game_init_ptr) = NULL;
 game_update_and_render_t(*game_update_and_render_ptr) = NULL;
@@ -72,6 +76,8 @@ internal_fn void PlatformReloadGameCodeLib() {
 
   printf("Reloaded game code from shared object\n");
 }
+
+#endif
 
 // NOTE: Handmade Hero does sound from a buffer
 // I couldn't figure it out with SDL3 so I haven't.
@@ -181,15 +187,7 @@ global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
 global_variable SDL_Gamepad *gamepad;
 global_variable int left_stick_deadzone = 9000;
-global_variable int right_stick_deadzone = 8000;
-
-global_variable SDL_Window *window = NULL;
-global_variable SDL_Renderer *renderer = NULL;
-global_variable SDL_Texture *tex = NULL;
-global_variable SDL_FRect destR = (SDL_FRect){
-    .x = 0,
-    .y = 0,
-};
+// global_variable int right_stick_deadzone = 8000;
 
 // /globals
 
@@ -229,10 +227,16 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
     }
 
     if (event->key.repeat == 0) {
+
+#if STATIC_WHOLE_COMPILE
+#else
+
       if (event->key.key == SDLK_F5 && event->key.down) {
         SDL_Log("Keyboard: F5");
         PlatformReloadGameCodeLib();
       }
+
+#endif
 
       if (event->key.key == SDLK_W) {
         PlatformHandleInputButton(&new_input->move_north, event->key.down);
@@ -365,12 +369,10 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
   }
 }
 
-// void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
-//                                 SDL_Texture *tex, offscreen_buffer *buffer) {
-void PlatformUpdateAndDrawFrame() {
-
-  destR.w = pixel_buffer.width * scale;
-  destR.h = pixel_buffer.height * scale;
+void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
+                                SDL_Texture *tex, offscreen_buffer *buffer) {
+  destR->w = pixel_buffer.width * scale;
+  destR->h = pixel_buffer.height * scale;
 
   SDL_UpdateTexture(tex, NULL, &pixel_buffer.buffer,
                     pixel_buffer.width * pixel_buffer.bytes_per_px);
@@ -378,14 +380,19 @@ void PlatformUpdateAndDrawFrame() {
   SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
   SDL_RenderClear(renderer);
 
-  SDL_RenderTexture(renderer, tex, NULL, &destR);
+  SDL_RenderTexture(renderer, tex, NULL, destR);
 
   SDL_RenderPresent(renderer);
 }
 
 int main(int argc, char *argv[]) {
 
+#if STATIC_WHOLE_COMPILE
+#else
+
   PlatformLoadGameCodeLib();
+
+#endif
 
   target_fps = 60;
   target_frame_time = 1000 / target_fps;
@@ -409,6 +416,14 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  local_persist SDL_Window *window = NULL;
+  local_persist SDL_Renderer *renderer = NULL;
+  local_persist SDL_Texture *tex = NULL;
+  local_persist SDL_FRect destR = (SDL_FRect){
+      .x = 0,
+      .y = 0,
+  };
+
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
   SDL_CreateWindowAndRenderer("Hello SDL3", WIDTH * scale, HEIGHT * scale, 0,
                               &window, &renderer);
@@ -416,6 +431,11 @@ int main(int argc, char *argv[]) {
   tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
                           SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
 
+#if STATIC_WHOLE_COMPILE
+
+  game_init(&game_memory, &pixel_buffer);
+
+#else
   if (game_init_ptr == NULL) {
     printf("game_init_ptr is NULL\n");
     exit(1);
@@ -425,13 +445,11 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  // SDL_Log("Attempting init");
-
   (*game_init_ptr)(&game_memory, &pixel_buffer);
 
-  // SDL_Log("Made it past init");
+#endif
 
-  // game_init(&game_memory, &pixel_buffer);
+  // Query OS for info about monitors such as refresh rate
 
   // float highestRate = 0.0f;
   // int nDisplays;
@@ -460,10 +478,13 @@ int main(int argc, char *argv[]) {
 
   while (!quit) {
 
+#if STATIC_WHOLE_COMPILE
+#else
     if (game_update_and_render_ptr == NULL) {
       printf("game_update_and_render_ptr is NULL\n");
       exit(1);
     }
+#endif
 
     last_tick = current_tick;
     current_tick = SDL_GetTicks();
@@ -503,35 +524,34 @@ int main(int argc, char *argv[]) {
 
     // // == DRAW ==
 
-    // PlatformUpdateAndDrawFrame(renderer, &destR, tex, surface,
-    // &pixel_buffer);
-
-    PlatformUpdateAndDrawFrame();
+    PlatformUpdateAndDrawFrame(renderer, &destR, tex, &pixel_buffer);
 
     // // == END DRAW ==
 
     // // == UPDATE ==
-    // // I don't think is the the correct way to do physics ticks
-    // if ((SDL_GetTicks() - current_tick) < target_physics_time) {
+
+#if STATIC_WHOLE_COMPILE
+
+    game_update_and_render(&game_memory, &pixel_buffer, new_input, delta_time);
+
+#else
 
     (*game_update_and_render_ptr)(&game_memory, &pixel_buffer, new_input,
                                   delta_time);
 
-    // game_update_and_render(&game_memory, &pixel_buffer, new_input,
-    // delta_time);
+#endif
 
     game_input_t *temp_input_ptr = new_input;
     new_input = old_input;
     old_input = temp_input_ptr;
 
-    // }
     // // == END UPDATE ==
 
     // Limit fps
     Uint64 frame_time = SDL_GetTicks() - current_tick;
 
     if (frame_time > 12)
-      SDL_Log("target: %ld, time: %ld", target_frame_time, frame_time);
+      SDL_Log("WARN: target: %ld, time: %ld", target_frame_time, frame_time);
 
     if (frame_time < target_frame_time) {
       SDL_Delay(target_frame_time - frame_time);
