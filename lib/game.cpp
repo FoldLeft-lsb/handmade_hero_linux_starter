@@ -76,7 +76,7 @@ extern "C" void game_update_and_render(game_memory_t *memory,
     state->alpha--;
   }
 
-  state->alpha++;
+  // state->alpha++;
 
   game_update_pixels_alpha(buff, state->alpha);
 };

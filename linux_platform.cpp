@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #if STATIC_WHOLE_COMPILE
@@ -17,11 +18,16 @@
 
 #else
 
+// This method of loading game functions from so
+// does not account for debug information presently
+
 game_init_t(*game_init_ptr) = NULL;
 game_update_and_render_t(*game_update_and_render_ptr) = NULL;
 
 void *game_lib_handle;
 const char *game_lib_name = "./lib/libgame.so";
+
+time_t prev_st_mtime;
 
 internal_fn void PlatformLoadGameCodeLib() {
 
@@ -47,34 +53,24 @@ internal_fn void PlatformLoadGameCodeLib() {
     exit(1);
   }
 
+  struct stat attr;
+  stat(game_lib_name, &attr);
+  prev_st_mtime = attr.st_mtime;
+
   printf("Loaded game code from shared object\n");
 }
 
 internal_fn void PlatformReloadGameCodeLib() {
-  char *error;
+  struct stat attr;
+  stat(game_lib_name, &attr);
+  int new_st_mtime = attr.st_mtime;
 
-  dlclose(game_lib_handle);
-  game_lib_handle = dlopen(game_lib_name, RTLD_NOW);
-  if (!game_lib_handle) {
-    fputs(dlerror(), stderr);
-    printf(" line %d\n", __LINE__);
-    exit(1);
+  if (new_st_mtime > prev_st_mtime) {
+    dlclose(game_lib_handle);
+    // If I don't wait then dlopen fails because the so isn't written yet
+    SDL_Delay(400);
+    PlatformLoadGameCodeLib();
   }
-
-  *(void **)(&game_init_ptr) = dlsym(game_lib_handle, "game_init");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    printf(" line %d\n", __LINE__);
-  }
-  *(void **)(&game_update_and_render_ptr) =
-      dlsym(game_lib_handle, "game_update_and_render");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    printf(" line %d\n", __LINE__);
-    exit(1);
-  }
-
-  printf("Reloaded game code from shared object\n");
 }
 
 #endif
@@ -165,6 +161,75 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
 
 // End File IO
 
+// Input recording and playback
+
+// // Use a file instead of memory
+// typedef struct recorded_input {
+//   int input_count;
+//   game_input_t *input_stream;
+// } recorded_input_t;
+
+typedef struct platform_state {
+
+  int input_recording_file_descriptor;
+  int input_recording_idx;
+
+  int input_playback_file_descriptor;
+  int input_playback_idx;
+
+} platform_state_t;
+
+const char *recording_filename = "foo.hmi";
+
+internal_fn void PlatformBeginRecordingInput(platform_state_t *platform_state,
+                                             int recording_idx) {
+  platform_state->input_recording_idx = recording_idx;
+  platform_state->input_recording_file_descriptor =
+      open(recording_filename, O_WRONLY | O_CREAT,
+           S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+}
+internal_fn void PlatformEndRecordingInput(platform_state_t *platform_state) {
+  platform_state->input_recording_idx = 0;
+  close(platform_state->input_recording_file_descriptor);
+}
+
+internal_fn void PlatformBeginPlaybackInput(platform_state_t *platform_state,
+                                            int playback_idx) {
+  platform_state->input_playback_idx = playback_idx;
+  platform_state->input_playback_file_descriptor =
+      open(recording_filename, O_RDONLY);
+}
+internal_fn void PlatformEndPlaybackInput(platform_state_t *platform_state) {
+  platform_state->input_playback_idx = 0;
+  close(platform_state->input_playback_file_descriptor);
+}
+
+internal_fn void PlatformRecordInput(platform_state_t *platform_state,
+                                     game_input_t *input) {
+
+  if (write(platform_state->input_recording_file_descriptor, input,
+            sizeof(*input))) {
+    SDL_Log("Recorded an input");
+  } else {
+    SDL_Log("Failed to record an input");
+  }
+}
+
+internal_fn void PlatformPlaybackInput(platform_state_t *platform_state,
+                                       game_input_t *input) {
+  if (read(platform_state->input_recording_file_descriptor, input,
+           sizeof(*input))) {
+    SDL_Log("Played back an input");
+  } else {
+    SDL_Log("Failed to playback an input");
+    int playing_idx = platform_state->input_playback_idx;
+    PlatformEndPlaybackInput(platform_state);
+    PlatformBeginPlaybackInput(platform_state, playing_idx);
+  }
+}
+
+// end Input recording and playback
+
 // Should eliminate some or all of these globals
 
 global_variable int target_fps;
@@ -217,7 +282,8 @@ internal_fn float PlatformGetGamepadAxisValue(int16_t value, int16_t deadzone) {
 
 internal_fn void PlatformHandleInputEvent(SDL_Event *event,
                                           game_input_t *new_input,
-                                          game_input_t *old_input) {
+                                          game_input_t *old_input,
+                                          platform_state_t *platform_state) {
   // Keyboard inputs
   if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
 
@@ -228,14 +294,19 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
 
     if (event->key.repeat == 0) {
 
-#if STATIC_WHOLE_COMPILE
-#else
+#if IN_DEVELOPMENT
 
-      if (event->key.key == SDLK_F5 && event->key.down) {
-        SDL_Log("Keyboard: F5");
-        PlatformReloadGameCodeLib();
+      if (event->key.key == SDLK_L && event->key.down) {
+        if (platform_state->input_recording_idx == 0) {
+          PlatformEndPlaybackInput(platform_state);
+          PlatformBeginRecordingInput(platform_state, 1);
+        } else {
+          PlatformEndRecordingInput(platform_state);
+          PlatformBeginPlaybackInput(platform_state, 1);
+        }
       }
-
+#else
+// Disable input recording and playback for non-DEV builds
 #endif
 
       if (event->key.key == SDLK_W) {
@@ -403,8 +474,22 @@ int main(int argc, char *argv[]) {
   game_memory.permanent_storage_size = Megabytes(64);
   game_memory.transient_storage_size = Megabytes(512);
 
+#if IN_DEVELOPMENT
+
+  // Clean address space with nothing in it means pointers
+  // saved to file as binary should remain valid when read from file
+
+  void *game_mem_base_addr = (void *)Terabytes(2);
+
+#else
+
+  // (void *)0 produces a nullptr, but I need an actual Zero value
+  void *game_mem_base_addr = (void *)(1 - 1);
+
+#endif
+
   game_memory.permanent_storage = mmap(
-      0, // Do I need to start at 0? can be NULL to let OS decide
+      game_mem_base_addr,
       game_memory.permanent_storage_size + game_memory.transient_storage_size,
       PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
@@ -476,10 +561,18 @@ int main(int argc, char *argv[]) {
   local_persist game_input_t *new_input = &input[0];
   local_persist game_input_t *old_input = &input[1];
 
+  platform_state_t platform_state = {
+      .input_recording_idx = 0,
+      .input_playback_idx = 0,
+  };
+
   while (!quit) {
 
 #if STATIC_WHOLE_COMPILE
 #else
+
+    PlatformReloadGameCodeLib();
+
     if (game_update_and_render_ptr == NULL) {
       printf("game_update_and_render_ptr is NULL\n");
       exit(1);
@@ -519,8 +612,26 @@ int main(int argc, char *argv[]) {
         SDL_Log("Gamepad Added %i", nGamepads);
       }
 
-      PlatformHandleInputEvent(&event, new_input, old_input);
+      PlatformHandleInputEvent(&event, new_input, old_input, &platform_state);
     }
+
+#if IN_DEVELOPMENT
+
+    // // Input recording and playback
+
+    if (platform_state.input_recording_idx) {
+      PlatformRecordInput(&platform_state, new_input);
+    }
+
+    if (platform_state.input_playback_idx) {
+      PlatformPlaybackInput(&platform_state, new_input);
+    }
+
+    // // end Input recording and playback
+
+#else
+// Disable input recording and playback for non-DEV builds
+#endif
 
     // // == DRAW ==
 
