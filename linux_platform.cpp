@@ -175,7 +175,7 @@ offscreen_buffer pixel_buffer =
                        .height = HEIGHT,
                        .length = WIDTH * HEIGHT * BYTES_PER_PX,
                        .bytes_per_px = BYTES_PER_PX,
-                       .buffer = {0}};
+                       .buffer = {}};
 
 global_variable int nGamepads;
 global_variable SDL_JoystickID *joystickId;
@@ -185,7 +185,6 @@ global_variable int right_stick_deadzone = 8000;
 
 global_variable SDL_Window *window = NULL;
 global_variable SDL_Renderer *renderer = NULL;
-global_variable SDL_Surface *surface = NULL;
 global_variable SDL_Texture *tex = NULL;
 global_variable SDL_FRect destR = (SDL_FRect){
     .x = 0,
@@ -368,27 +367,21 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
 
 // void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
 //                                 SDL_Texture *tex, offscreen_buffer *buffer) {
-// void PlatformUpdateAndDrawFrame() {
+void PlatformUpdateAndDrawFrame() {
 
-//   surface->pixels = pixel_buffer.buffer;
+  destR.w = pixel_buffer.width * scale;
+  destR.h = pixel_buffer.height * scale;
 
-//   destR.w = pixel_buffer.width * scale;
-//   destR.h = pixel_buffer.height * scale;
+  SDL_UpdateTexture(tex, NULL, &pixel_buffer.buffer,
+                    pixel_buffer.width * pixel_buffer.bytes_per_px);
 
-//   // SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
-//   //                   buffer->width * buffer->bytes_per_px);
+  SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
+  SDL_RenderClear(renderer);
 
-//   tex = SDL_CreateTextureFromSurface(renderer, surface);
+  SDL_RenderTexture(renderer, tex, NULL, &destR);
 
-//   SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
-//   SDL_RenderClear(renderer);
-
-//   SDL_RenderTexture(renderer, tex, NULL, &destR);
-
-//   SDL_RenderPresent(renderer);
-
-//   SDL_DestroyTexture(tex);
-// }
+  SDL_RenderPresent(renderer);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -420,30 +413,23 @@ int main(int argc, char *argv[]) {
   SDL_CreateWindowAndRenderer("Hello SDL3", WIDTH * scale, HEIGHT * scale, 0,
                               &window, &renderer);
   SDL_SetWindowResizable(window, true);
+  tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                          SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
 
-  surface = SDL_CreateSurface(pixel_buffer.width, pixel_buffer.height,
-                              SDL_PIXELFORMAT_RGBA8888);
-  // tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-  //                         SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
-  // tex = SDL_CreateTextureFromSurface(renderer, surface);
-
-  // SDL_Log("Checking game_init_ptr %p", game_init_ptr);
   if (game_init_ptr == NULL) {
     printf("game_init_ptr is NULL\n");
     exit(1);
   }
-  // SDL_Log("Checking game_update_and_render_ptr %p",
-  // game_update_and_render_ptr);
   if (game_update_and_render_ptr == NULL) {
     printf("game_update_and_render_ptr is NULL\n");
     exit(1);
   }
 
-  SDL_Log("Attempting init");
+  // SDL_Log("Attempting init");
 
   (*game_init_ptr)(&game_memory, &pixel_buffer);
 
-  SDL_Log("Made it past init");
+  // SDL_Log("Made it past init");
 
   // game_init(&game_memory, &pixel_buffer);
 
@@ -520,26 +506,7 @@ int main(int argc, char *argv[]) {
     // PlatformUpdateAndDrawFrame(renderer, &destR, tex, surface,
     // &pixel_buffer);
 
-    // PlatformUpdateAndDrawFrame();
-
-    surface->pixels = pixel_buffer.buffer;
-
-    destR.w = pixel_buffer.width * scale;
-    destR.h = pixel_buffer.height * scale;
-
-    // SDL_UpdateTexture(tex, NULL, &(buffer->buffer),
-    //                   buffer->width * buffer->bytes_per_px);
-
-    tex = SDL_CreateTextureFromSurface(renderer, surface);
-
-    SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 0xFF);
-    SDL_RenderClear(renderer);
-
-    SDL_RenderTexture(renderer, tex, NULL, &destR);
-
-    SDL_RenderPresent(renderer);
-
-    SDL_DestroyTexture(tex);
+    PlatformUpdateAndDrawFrame();
 
     // // == END DRAW ==
 
