@@ -171,6 +171,9 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
 
 typedef struct platform_state {
 
+  Uint64 game_memory_total_size;
+  void *game_memory_block;
+
   int input_recording_file_descriptor;
   int input_recording_idx;
 
@@ -183,10 +186,21 @@ const char *recording_filename = "foo.hmi";
 
 internal_fn void PlatformBeginRecordingInput(platform_state_t *platform_state,
                                              int recording_idx) {
+  if (platform_state->game_memory_total_size > 0xFFFFFFFF) {
+    SDL_Log("Attempted to read game memory that exceeds max 32bit int");
+    exit(1);
+  };
   platform_state->input_recording_idx = recording_idx;
   platform_state->input_recording_file_descriptor =
       open(recording_filename, O_WRONLY | O_CREAT,
            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  if (write(platform_state->input_recording_file_descriptor,
+            platform_state->game_memory_block,
+            platform_state->game_memory_total_size)) {
+    SDL_Log("Recorded game memory block");
+  } else {
+    SDL_Log("Failed to record game memory block");
+  }
 }
 internal_fn void PlatformEndRecordingInput(platform_state_t *platform_state) {
   platform_state->input_recording_idx = 0;
@@ -195,9 +209,20 @@ internal_fn void PlatformEndRecordingInput(platform_state_t *platform_state) {
 
 internal_fn void PlatformBeginPlaybackInput(platform_state_t *platform_state,
                                             int playback_idx) {
+  if (platform_state->game_memory_total_size > 0xFFFFFFFF) {
+    SDL_Log("Attempted to write game memory that exceeds max 32bit int");
+    exit(1);
+  };
   platform_state->input_playback_idx = playback_idx;
   platform_state->input_playback_file_descriptor =
       open(recording_filename, O_RDONLY);
+  if (read(platform_state->input_playback_file_descriptor,
+           platform_state->game_memory_block,
+           platform_state->game_memory_total_size)) {
+    SDL_Log("Recovered game memory block");
+  } else {
+    SDL_Log("Failed to recover game memory block");
+  }
 }
 internal_fn void PlatformEndPlaybackInput(platform_state_t *platform_state) {
   platform_state->input_playback_idx = 0;
@@ -209,7 +234,7 @@ internal_fn void PlatformRecordInput(platform_state_t *platform_state,
 
   if (write(platform_state->input_recording_file_descriptor, input,
             sizeof(*input))) {
-    SDL_Log("Recorded an input");
+    // SDL_Log("Recorded an input");
   } else {
     SDL_Log("Failed to record an input");
   }
@@ -219,9 +244,9 @@ internal_fn void PlatformPlaybackInput(platform_state_t *platform_state,
                                        game_input_t *input) {
   if (read(platform_state->input_recording_file_descriptor, input,
            sizeof(*input))) {
-    SDL_Log("Played back an input");
+    // SDL_Log("Played back an input");
   } else {
-    SDL_Log("Failed to playback an input");
+    SDL_Log("Looping playback");
     int playing_idx = platform_state->input_playback_idx;
     PlatformEndPlaybackInput(platform_state);
     PlatformBeginPlaybackInput(platform_state, playing_idx);
@@ -488,12 +513,25 @@ int main(int argc, char *argv[]) {
 
 #endif
 
-  game_memory.permanent_storage = mmap(
-      game_mem_base_addr,
-      game_memory.permanent_storage_size + game_memory.transient_storage_size,
-      PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  platform_state_t platform_state = {
+      .game_memory_total_size = 0,
+      .game_memory_block = nullptr,
 
-  game_memory.transient_storage = (Uint8 *)(game_memory.permanent_storage) +
+      .input_recording_file_descriptor = 0,
+      .input_recording_idx = 0,
+      .input_playback_file_descriptor = 0,
+      .input_playback_idx = 0,
+  };
+
+  platform_state.game_memory_total_size =
+      game_memory.permanent_storage_size + game_memory.transient_storage_size;
+
+  platform_state.game_memory_block =
+      mmap(game_mem_base_addr, platform_state.game_memory_total_size,
+           PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+
+  game_memory.permanent_storage = platform_state.game_memory_block;
+  game_memory.transient_storage = (Uint8 *)(platform_state.game_memory_block) +
                                   game_memory.permanent_storage_size;
   if (game_memory.permanent_storage == NULL ||
       game_memory.transient_storage == NULL) {
@@ -560,11 +598,6 @@ int main(int argc, char *argv[]) {
   local_persist game_input_t input[2] = {};
   local_persist game_input_t *new_input = &input[0];
   local_persist game_input_t *old_input = &input[1];
-
-  platform_state_t platform_state = {
-      .input_recording_idx = 0,
-      .input_playback_idx = 0,
-  };
 
   while (!quit) {
 
