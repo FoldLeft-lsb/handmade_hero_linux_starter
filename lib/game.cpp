@@ -37,7 +37,8 @@ extern "C" void game_init(game_memory_t *memory, offscreen_buffer *buff) {
   game_init_pixels(buff);
 };
 
-extern "C" void game_update_and_render(game_memory_t *memory,
+extern "C" void game_update_and_render(thread_context_t *thread_context,
+                                       game_memory_t *memory,
                                        offscreen_buffer *buff,
                                        game_input_t *input, float delta_time) {
 
@@ -70,9 +71,9 @@ extern "C" void game_update_and_render(game_memory_t *memory,
     // // File IO worked correctly in manual testing
   }
 
-  if (input->move_north.ended_down) {
+  if (input->controller.move_north.ended_down) {
     state->alpha++;
-  } else if (input->move_south.ended_down) {
+  } else if (input->controller.move_south.ended_down) {
     state->alpha--;
   }
 

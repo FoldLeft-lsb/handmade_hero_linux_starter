@@ -163,12 +163,6 @@ bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
 
 // Input recording and playback
 
-// // Use a file instead of memory
-// typedef struct recorded_input {
-//   int input_count;
-//   game_input_t *input_stream;
-// } recorded_input_t;
-
 typedef struct platform_state {
 
   Uint64 game_memory_total_size;
@@ -180,9 +174,12 @@ typedef struct platform_state {
   int input_playback_file_descriptor;
   int input_playback_idx;
 
+  bool recording;
+  bool playing;
+
 } platform_state_t;
 
-const char *recording_filename = "foo.hmi";
+const char *record_filename_format = "./tmp/playback_%d.dat";
 
 internal_fn void PlatformBeginRecordingInput(platform_state_t *platform_state,
                                              int recording_idx) {
@@ -190,20 +187,24 @@ internal_fn void PlatformBeginRecordingInput(platform_state_t *platform_state,
     SDL_Log("Attempted to read game memory that exceeds max 32bit int");
     exit(1);
   };
+  int namesize = 32;
+  char name[namesize];
+  snprintf(name, namesize, record_filename_format, recording_idx);
   platform_state->input_recording_idx = recording_idx;
   platform_state->input_recording_file_descriptor =
-      open(recording_filename, O_WRONLY | O_CREAT,
-           S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+      open(name, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
   if (write(platform_state->input_recording_file_descriptor,
             platform_state->game_memory_block,
             platform_state->game_memory_total_size)) {
     SDL_Log("Recorded game memory block");
+    platform_state->recording = true;
   } else {
     SDL_Log("Failed to record game memory block");
   }
 }
 internal_fn void PlatformEndRecordingInput(platform_state_t *platform_state) {
-  platform_state->input_recording_idx = 0;
+  platform_state->recording = false;
   close(platform_state->input_recording_file_descriptor);
 }
 
@@ -213,19 +214,23 @@ internal_fn void PlatformBeginPlaybackInput(platform_state_t *platform_state,
     SDL_Log("Attempted to write game memory that exceeds max 32bit int");
     exit(1);
   };
+  int namesize = 32;
+  char name[namesize];
+  snprintf(name, namesize, record_filename_format, playback_idx);
+
   platform_state->input_playback_idx = playback_idx;
-  platform_state->input_playback_file_descriptor =
-      open(recording_filename, O_RDONLY);
+  platform_state->input_playback_file_descriptor = open(name, O_RDONLY);
   if (read(platform_state->input_playback_file_descriptor,
            platform_state->game_memory_block,
            platform_state->game_memory_total_size)) {
     SDL_Log("Recovered game memory block");
+    platform_state->playing = true;
   } else {
     SDL_Log("Failed to recover game memory block");
   }
 }
 internal_fn void PlatformEndPlaybackInput(platform_state_t *platform_state) {
-  platform_state->input_playback_idx = 0;
+  platform_state->playing = false;
   close(platform_state->input_playback_file_descriptor);
 }
 
@@ -250,6 +255,9 @@ internal_fn void PlatformPlaybackInput(platform_state_t *platform_state,
     int playing_idx = platform_state->input_playback_idx;
     PlatformEndPlaybackInput(platform_state);
     PlatformBeginPlaybackInput(platform_state, playing_idx);
+    // Attempt a first read here to avoid having a leaky 1-frame input
+    read(platform_state->input_recording_file_descriptor, input,
+         sizeof(*input));
   }
 }
 
@@ -264,7 +272,7 @@ global_variable Uint64 target_physics_time;
 
 global_variable bool quit = false;
 
-const int scale = 2;
+const int scale = 1;
 
 offscreen_buffer pixel_buffer =
     (offscreen_buffer){.width = WIDTH,
@@ -309,6 +317,28 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
                                           game_input_t *new_input,
                                           game_input_t *old_input,
                                           platform_state_t *platform_state) {
+  // Mouse for debug purposes
+  // Generates multiple events per frame which is not desireable
+  // unsigned int l = (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK);
+  // Apparently this comparison can be used to detect a mouse click
+
+  float mouseX_f;
+  float mouseY_f;
+  SDL_GetMouseState(&mouseX_f, &mouseY_f);
+  new_input->mouseX = (Uint32)mouseX_f;
+  new_input->mouseY = (Uint32)mouseY_f;
+  // new_input->mouseY = 0; // Support mouse wheel scroll?
+
+  if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+      event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+    if (event->button.button == SDL_BUTTON_LEFT) {
+      PlatformHandleInputButton(&new_input->left_click, event->button.down);
+    }
+    if (event->button.button == SDL_BUTTON_RIGHT) {
+      PlatformHandleInputButton(&new_input->right_click, event->button.down);
+    }
+  }
+
   // Keyboard inputs
   if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
 
@@ -321,69 +351,127 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
 
 #if IN_DEVELOPMENT
 
-      if (event->key.key == SDLK_L && event->key.down) {
-        if (platform_state->input_recording_idx == 0) {
-          PlatformEndPlaybackInput(platform_state);
-          PlatformBeginRecordingInput(platform_state, 1);
-        } else {
-          PlatformEndRecordingInput(platform_state);
-          PlatformBeginPlaybackInput(platform_state, 1);
+      if ((!platform_state->recording) && (!platform_state->playing)) {
+        if (event->key.mod & SDL_KMOD_ALT && event->key.key == SDLK_7 &&
+            event->key.down) {
+          platform_state->input_recording_idx = 0;
+          platform_state->input_playback_idx = 0;
+          SDL_Log("Save state slot 0");
+        }
+        if (event->key.mod & SDL_KMOD_ALT && event->key.key == SDLK_8 &&
+            event->key.down) {
+          platform_state->input_recording_idx = 1;
+          platform_state->input_playback_idx = 1;
+          SDL_Log("Save state slot 1");
+        }
+        if (event->key.mod & SDL_KMOD_ALT && event->key.key == SDLK_9 &&
+            event->key.down) {
+          platform_state->input_recording_idx = 2;
+          platform_state->input_playback_idx = 2;
+          SDL_Log("Save state slot 2");
+        }
+        if (event->key.mod & SDL_KMOD_ALT && event->key.key == SDLK_0 &&
+            event->key.down) {
+          platform_state->input_recording_idx = 3;
+          platform_state->input_playback_idx = 3;
+          SDL_Log("Save state slot 3");
         }
       }
+
+      if (event->key.key == SDLK_L && event->key.down) {
+        if (!platform_state->playing) {
+          if (!platform_state->recording) {
+            PlatformBeginRecordingInput(platform_state,
+                                        platform_state->input_recording_idx);
+          } else {
+            PlatformEndRecordingInput(platform_state);
+            PlatformBeginPlaybackInput(platform_state,
+                                       platform_state->input_playback_idx);
+          }
+        } else {
+          PlatformEndPlaybackInput(platform_state);
+          new_input->controller = {};
+        }
+      }
+
 #else
 // Disable input recording and playback for non-DEV builds
 #endif
 
       if (event->key.key == SDLK_W) {
-        PlatformHandleInputButton(&new_input->move_north, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_north,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_A) {
-        PlatformHandleInputButton(&new_input->move_west, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_west,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_S) {
-        PlatformHandleInputButton(&new_input->move_south, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_south,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_D) {
-        PlatformHandleInputButton(&new_input->move_east, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_east,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_UP) {
-        PlatformHandleInputButton(&new_input->move_north, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_north,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_LEFT) {
-        PlatformHandleInputButton(&new_input->move_west, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_west,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_DOWN) {
-        PlatformHandleInputButton(&new_input->move_south, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_south,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_RIGHT) {
-        PlatformHandleInputButton(&new_input->move_east, event->key.down);
+        new_input->controller.is_analog = false;
+        PlatformHandleInputButton(&new_input->controller.move_east,
+                                  event->key.down);
       }
 
       if (event->key.key == SDLK_E) {
-        PlatformHandleInputButton(&new_input->action_south, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.action_south,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_F) {
-        PlatformHandleInputButton(&new_input->action_east, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.action_east,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_Q) {
-        PlatformHandleInputButton(&new_input->action_west, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.action_west,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_R) {
-        PlatformHandleInputButton(&new_input->action_north, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.action_north,
+                                  event->key.down);
       }
 
       if (event->key.key == SDLK_LSHIFT) {
-        PlatformHandleInputButton(&new_input->left_shoulder, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.left_shoulder,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_LCTRL) {
-        PlatformHandleInputButton(&new_input->right_shoulder, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.right_shoulder,
+                                  event->key.down);
       }
 
       if (event->key.key == SDLK_P) {
-        PlatformHandleInputButton(&new_input->start, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.start,
+                                  event->key.down);
       }
       if (event->key.key == SDLK_I) {
-        PlatformHandleInputButton(&new_input->select, event->key.down);
+        PlatformHandleInputButton(&new_input->controller.select,
+                                  event->key.down);
       }
     }
   }
@@ -393,24 +481,26 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
     if (event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX ||
         event->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
 
-      new_input->is_analog = true;
+      new_input->controller.is_analog = true;
 
-      new_input->left_stick_average_x =
+      new_input->controller.left_stick_average_x =
           PlatformGetGamepadAxisValue(event->gaxis.value, left_stick_deadzone);
-      new_input->left_stick_average_y =
+      new_input->controller.left_stick_average_y =
           PlatformGetGamepadAxisValue(event->gaxis.value, left_stick_deadzone);
 
       float threshold = 0.5f;
-      PlatformHandleGamepadButton(&old_input->move_west, &new_input->move_west,
-                                  new_input->left_stick_average_x < -threshold);
-      PlatformHandleGamepadButton(&old_input->move_east, &new_input->move_east,
-                                  new_input->left_stick_average_x > threshold);
-      PlatformHandleGamepadButton(&old_input->move_north,
-                                  &new_input->move_north,
-                                  new_input->left_stick_average_y < -threshold);
-      PlatformHandleGamepadButton(&old_input->move_south,
-                                  &new_input->move_south,
-                                  new_input->left_stick_average_y > threshold);
+      PlatformHandleGamepadButton(
+          &old_input->controller.move_west, &new_input->controller.move_west,
+          new_input->controller.left_stick_average_x < -threshold);
+      PlatformHandleGamepadButton(
+          &old_input->controller.move_east, &new_input->controller.move_east,
+          new_input->controller.left_stick_average_x > threshold);
+      PlatformHandleGamepadButton(
+          &old_input->controller.move_north, &new_input->controller.move_north,
+          new_input->controller.left_stick_average_y < -threshold);
+      PlatformHandleGamepadButton(
+          &old_input->controller.move_south, &new_input->controller.move_south,
+          new_input->controller.left_stick_average_y > threshold);
     }
   }
 
@@ -418,49 +508,60 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
       event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) {
 
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
-      PlatformHandleInputButton(&new_input->start, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.start,
+                                event->gbutton.down);
       quit = true;
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
-      PlatformHandleInputButton(&new_input->select, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.select,
+                                event->gbutton.down);
     }
 
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
-      PlatformHandleInputButton(&new_input->left_shoulder, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.left_shoulder,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
-      PlatformHandleInputButton(&new_input->right_shoulder,
+      PlatformHandleInputButton(&new_input->controller.right_shoulder,
                                 event->gbutton.down);
     }
 
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
-      PlatformHandleInputButton(&new_input->action_west, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.action_west,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) {
-      PlatformHandleInputButton(&new_input->action_north, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.action_north,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
-      PlatformHandleInputButton(&new_input->action_south, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.action_south,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
-      PlatformHandleInputButton(&new_input->action_east, event->gbutton.down);
+      PlatformHandleInputButton(&new_input->controller.action_east,
+                                event->gbutton.down);
     }
 
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_UP) {
-      new_input->is_analog = false;
-      PlatformHandleInputButton(&new_input->move_north, event->gbutton.down);
+      new_input->controller.is_analog = false;
+      PlatformHandleInputButton(&new_input->controller.move_north,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
-      new_input->is_analog = false;
-      PlatformHandleInputButton(&new_input->move_south, event->gbutton.down);
+      new_input->controller.is_analog = false;
+      PlatformHandleInputButton(&new_input->controller.move_south,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
-      new_input->is_analog = false;
-      PlatformHandleInputButton(&new_input->move_west, event->gbutton.down);
+      new_input->controller.is_analog = false;
+      PlatformHandleInputButton(&new_input->controller.move_west,
+                                event->gbutton.down);
     }
     if (event->gbutton.button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
-      new_input->is_analog = false;
-      PlatformHandleInputButton(&new_input->move_east, event->gbutton.down);
+      new_input->controller.is_analog = false;
+      PlatformHandleInputButton(&new_input->controller.move_east,
+                                event->gbutton.down);
     }
   }
 }
@@ -521,6 +622,9 @@ int main(int argc, char *argv[]) {
       .input_recording_idx = 0,
       .input_playback_file_descriptor = 0,
       .input_playback_idx = 0,
+
+      .recording = false,
+      .playing = false,
   };
 
   platform_state.game_memory_total_size =
@@ -553,6 +657,8 @@ int main(int argc, char *argv[]) {
   SDL_SetWindowResizable(window, true);
   tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
                           SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
+
+  thread_context_t thread_context = {};
 
 #if STATIC_WHOLE_COMPILE
 
@@ -617,11 +723,15 @@ int main(int argc, char *argv[]) {
     delta_time = (current_tick - last_tick) / 1000.0f;
 
     *new_input = {};
-    for (int button_i = 0; button_i < array_length(new_input->buttons);
-         button_i++) {
-      new_input->buttons[button_i].ended_down =
-          old_input->buttons[button_i].ended_down;
+    for (int button_i = 0;
+         button_i < array_length(new_input->controller.buttons); button_i++) {
+      new_input->controller.buttons[button_i].ended_down =
+          old_input->controller.buttons[button_i].ended_down;
     }
+    new_input->controller.is_analog = old_input->controller.is_analog;
+    new_input->mouseX = old_input->mouseX;
+    new_input->mouseY = old_input->mouseY;
+    new_input->mouseZ = old_input->mouseZ;
 
     SDL_Event event = {};
     while (SDL_PollEvent(&event)) {
@@ -652,11 +762,11 @@ int main(int argc, char *argv[]) {
 
     // // Input recording and playback
 
-    if (platform_state.input_recording_idx) {
+    if (platform_state.recording) {
       PlatformRecordInput(&platform_state, new_input);
     }
 
-    if (platform_state.input_playback_idx) {
+    if (platform_state.playing) {
       PlatformPlaybackInput(&platform_state, new_input);
     }
 
@@ -676,12 +786,13 @@ int main(int argc, char *argv[]) {
 
 #if STATIC_WHOLE_COMPILE
 
-    game_update_and_render(&game_memory, &pixel_buffer, new_input, delta_time);
+    game_update_and_render(&thread_context, &game_memory, &pixel_buffer,
+                           new_input, delta_time);
 
 #else
 
-    (*game_update_and_render_ptr)(&game_memory, &pixel_buffer, new_input,
-                                  delta_time);
+    (*game_update_and_render_ptr)(&thread_context, &game_memory, &pixel_buffer,
+                                  new_input, delta_time);
 
 #endif
 

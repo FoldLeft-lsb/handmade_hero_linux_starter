@@ -30,7 +30,7 @@ typedef struct game_button_state {
   bool ended_down;
 } game_button_state_t;
 
-typedef struct game_input {
+typedef struct controller_input {
   float left_stick_average_x;
   float left_stick_average_y;
   bool is_analog;
@@ -55,7 +55,23 @@ typedef struct game_input {
       game_button_state_t select;
     };
   };
+} controller_input_t;
+
+typedef struct game_input {
+  controller_input_t controller;
+
+  union {
+    game_button_state_t mouse_buttons[2];
+    struct {
+      game_button_state_t left_click;
+      game_button_state_t right_click;
+    };
+  };
+  Uint32 mouseX, mouseY, mouseZ;
 } game_input_t;
+
+typedef struct thread_context {
+} thread_context_t;
 
 typedef struct game_state {
   Uint8 alpha;
@@ -73,7 +89,8 @@ typedef struct game_memory {
 } game_memory_t;
 
 typedef void game_init_t(game_memory_t *memory, offscreen_buffer *buff);
-typedef void game_update_and_render_t(game_memory_t *memory,
+typedef void game_update_and_render_t(thread_context_t *thread,
+                                      game_memory_t *memory,
                                       offscreen_buffer *buff,
                                       game_input_t *input, float delta_time);
 

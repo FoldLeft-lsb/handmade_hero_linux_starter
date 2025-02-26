@@ -1,5 +1,5 @@
 COMPILER= clang++
-COMMON_FLAGS= -Wall -Wl,-Bstatic -lSDL3 -Wl,-Bdynamic 
+COMMON_FLAGS= -Wall -Wl,-Bstatic -lSDL3 -Wl,-Bdynamic
 DEV_MEM_OPTIONS= -DIN_DEVELOPMENT=1
 
 # default will make the game code as a shared object 
