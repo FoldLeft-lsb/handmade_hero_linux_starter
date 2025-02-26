@@ -560,10 +560,25 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
   }
 }
 
-void PlatformUpdateAndDrawFrame(SDL_Renderer *renderer, SDL_FRect *destR,
-                                SDL_Texture *tex, offscreen_buffer *buffer) {
+void PlatformUpdateAndDrawFrame(SDL_Window *window, SDL_Renderer *renderer,
+                                SDL_FRect *destR, SDL_Texture *tex,
+                                offscreen_buffer *buffer) {
   destR->w = pixel_buffer.width * scale;
   destR->h = pixel_buffer.height * scale;
+  int window_width;
+  int window_height;
+  int gutter_x = 0;
+  int gutter_y = 0;
+  SDL_GetWindowSizeInPixels(window, &window_width, &window_height);
+  if (window_height > buffer->height) {
+    gutter_y = (window_height - buffer->height) / 2;
+  }
+  if (window_width > buffer->width) {
+    gutter_x = (window_width - buffer->width) / 2;
+  }
+
+  destR->x = gutter_x;
+  destR->y = gutter_y;
 
   SDL_UpdateTexture(tex, NULL, &pixel_buffer.buffer,
                     pixel_buffer.width * pixel_buffer.bytes_per_px);
@@ -771,7 +786,7 @@ int main(int argc, char *argv[]) {
 
     // Draw
 
-    PlatformUpdateAndDrawFrame(renderer, &destR, tex, &pixel_buffer);
+    PlatformUpdateAndDrawFrame(window, renderer, &destR, tex, &pixel_buffer);
 
     // end Draw
 
