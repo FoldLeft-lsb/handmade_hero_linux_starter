@@ -19,7 +19,7 @@ internal_fn void game_update_pixels_alpha(offscreen_buffer *buff,
   }
 }
 
-extern "C" void game_init(game_memory_t *memory, offscreen_buffer *buff) {
+internal_fn void game_init(game_memory_t *memory, offscreen_buffer *buff) {
   game_init_pixels(buff);
 };
 
@@ -31,6 +31,7 @@ extern "C" void game_update_and_render(thread_context_t *thread_context,
   game_state_t *state = (game_state_t *)memory->permanent_storage;
   if (!memory->is_initialized) {
     memory->is_initialized = true;
+    game_init_pixels(buff);
 
     state->alpha = 0x00;
   }

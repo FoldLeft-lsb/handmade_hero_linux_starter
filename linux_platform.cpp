@@ -24,7 +24,6 @@
 
 // Should probably sort out debugger info
 
-game_init_t(*game_init_ptr) = NULL;
 game_update_and_render_t(*game_update_and_render_ptr) = NULL;
 
 void *game_lib_handle;
@@ -43,11 +42,6 @@ internal_fn void PlatformLoadGameCodeLib() {
     exit(1);
   }
 
-  *(void **)(&game_init_ptr) = dlsym(game_lib_handle, "game_init");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    SDL_Log(" line %d", __LINE__);
-  }
   *(void **)(&game_update_and_render_ptr) =
       dlsym(game_lib_handle, "game_update_and_render");
   if ((error = dlerror()) != NULL) {
@@ -666,25 +660,6 @@ int main(int argc, char *argv[]) {
 
   thread_context_t thread_context = {};
 
-#if STATIC_WHOLE_COMPILE
-
-  game_init(&game_memory, &pixel_buffer);
-
-#else
-
-  if (game_init_ptr == NULL) {
-    SDL_Log("game_init_ptr is NULL");
-    exit(1);
-  }
-  if (game_update_and_render_ptr == NULL) {
-    SDL_Log("game_update_and_render_ptr is NULL");
-    exit(1);
-  }
-
-  (*game_init_ptr)(&game_memory, &pixel_buffer);
-
-#endif
-
   // Query OS for info about monitors such as refresh rate
 
   // float highestRate = 0.0f;
@@ -748,9 +723,9 @@ int main(int argc, char *argv[]) {
         // Quit if told to
         quit = true;
       }
-      if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-        SDL_Log("Window Resized");
-      }
+      // if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+      //   SDL_Log("Window Resized");
+      // }
 
       if (event.type == SDL_EVENT_GAMEPAD_REMOVED) {
         SDL_Log("Gamepad Removed");

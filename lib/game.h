@@ -88,7 +88,6 @@ typedef struct game_memory {
   bool is_initialized;
 } game_memory_t;
 
-typedef void game_init_t(game_memory_t *memory, offscreen_buffer *buff);
 typedef void game_update_and_render_t(thread_context_t *thread,
                                       game_memory_t *memory,
                                       offscreen_buffer *buff,
