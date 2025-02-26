@@ -4,7 +4,6 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -12,14 +11,18 @@
 #include <time.h>
 #include <unistd.h>
 
+// NOTE: Handmade Hero does sound from a buffer
+// I couldn't figure it out with SDL3 so I haven't.
+// Either I will figure it out, or just use SDL later
+// without managing the buffer myself.
+
 #if STATIC_WHOLE_COMPILE
 
 #include "lib/game.cpp"
 
 #else
 
-// This method of loading game functions from so
-// does not account for debug information presently
+// Should probably sort out debugger info
 
 game_init_t(*game_init_ptr) = NULL;
 game_update_and_render_t(*game_update_and_render_ptr) = NULL;
@@ -36,20 +39,20 @@ internal_fn void PlatformLoadGameCodeLib() {
   game_lib_handle = dlopen(game_lib_name, RTLD_NOW);
   if (!game_lib_handle) {
     fputs(dlerror(), stderr);
-    printf(" line %d\n", __LINE__);
+    SDL_Log(" line %d", __LINE__);
     exit(1);
   }
 
   *(void **)(&game_init_ptr) = dlsym(game_lib_handle, "game_init");
   if ((error = dlerror()) != NULL) {
     fputs(error, stderr);
-    printf(" line %d\n", __LINE__);
+    SDL_Log(" line %d", __LINE__);
   }
   *(void **)(&game_update_and_render_ptr) =
       dlsym(game_lib_handle, "game_update_and_render");
   if ((error = dlerror()) != NULL) {
     fputs(error, stderr);
-    printf(" line %d\n", __LINE__);
+    SDL_Log(" line %d", __LINE__);
     exit(1);
   }
 
@@ -57,7 +60,7 @@ internal_fn void PlatformLoadGameCodeLib() {
   stat(game_lib_name, &attr);
   prev_st_mtime = attr.st_mtime;
 
-  printf("Loaded game code from shared object\n");
+  SDL_Log("Loaded game code from shared object");
 }
 
 internal_fn void PlatformReloadGameCodeLib() {
@@ -75,16 +78,7 @@ internal_fn void PlatformReloadGameCodeLib() {
 
 #endif
 
-// NOTE: Handmade Hero does sound from a buffer
-// I couldn't figure it out with SDL3 so I haven't.
-// Either I will figure it out, or just use SDL later
-// without managing the buffer myself.
-
 // File IO
-// These functions are defined in game.h
-// and implemented here, part of the platform
-// layer that is accessible within the game.
-// Is that OK? I don't know lol
 
 Uint32 SafeTruncateUInt64(Uint64 value) {
   // assert
@@ -189,7 +183,7 @@ internal_fn void PlatformBeginRecordingInput(platform_state_t *platform_state,
   };
   int namesize = 32;
   char name[namesize];
-  snprintf(name, namesize, record_filename_format, recording_idx);
+  SDL_snprintf(name, namesize, record_filename_format, recording_idx);
   platform_state->input_recording_idx = recording_idx;
   platform_state->input_recording_file_descriptor =
       open(name, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -216,7 +210,7 @@ internal_fn void PlatformBeginPlaybackInput(platform_state_t *platform_state,
   };
   int namesize = 32;
   char name[namesize];
-  snprintf(name, namesize, record_filename_format, playback_idx);
+  SDL_snprintf(name, namesize, record_filename_format, playback_idx);
 
   platform_state->input_playback_idx = playback_idx;
   platform_state->input_playback_file_descriptor = open(name, O_RDONLY);
@@ -254,8 +248,8 @@ internal_fn void PlatformPlaybackInput(platform_state_t *platform_state,
     SDL_Log("Looping playback");
     int playing_idx = platform_state->input_playback_idx;
     PlatformEndPlaybackInput(platform_state);
+
     PlatformBeginPlaybackInput(platform_state, playing_idx);
-    // Attempt a first read here to avoid having a leaky 1-frame input
     read(platform_state->input_recording_file_descriptor, input,
          sizeof(*input));
   }
@@ -287,7 +281,7 @@ global_variable SDL_Gamepad *gamepad;
 global_variable int left_stick_deadzone = 9000;
 // global_variable int right_stick_deadzone = 8000;
 
-// /globals
+// end globals
 
 internal_fn void PlatformHandleInputButton(game_button_state_t *new_state,
                                            bool value) {
@@ -319,8 +313,8 @@ internal_fn void PlatformHandleInputEvent(SDL_Event *event,
                                           platform_state_t *platform_state) {
   // Mouse for debug purposes
   // Generates multiple events per frame which is not desireable
-  // unsigned int l = (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK);
-  // Apparently this comparison can be used to detect a mouse click
+  // uint leftclick = (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK);
+  // can be used to detect a mouse click
 
   float mouseX_f;
   float mouseY_f;
@@ -602,14 +596,11 @@ int main(int argc, char *argv[]) {
 
 #if IN_DEVELOPMENT
 
-  // Clean address space with nothing in it means pointers
-  // saved to file as binary should remain valid when read from file
-
   void *game_mem_base_addr = (void *)Terabytes(2);
 
 #else
 
-  // (void *)0 produces a nullptr, but I need an actual Zero value
+  // (void *)0 produces a nullptr, but I want an actual Zero value...
   void *game_mem_base_addr = (void *)(1 - 1);
 
 #endif
@@ -665,12 +656,13 @@ int main(int argc, char *argv[]) {
   game_init(&game_memory, &pixel_buffer);
 
 #else
+
   if (game_init_ptr == NULL) {
-    printf("game_init_ptr is NULL\n");
+    SDL_Log("game_init_ptr is NULL");
     exit(1);
   }
   if (game_update_and_render_ptr == NULL) {
-    printf("game_update_and_render_ptr is NULL\n");
+    SDL_Log("game_update_and_render_ptr is NULL");
     exit(1);
   }
 
@@ -713,9 +705,10 @@ int main(int argc, char *argv[]) {
     PlatformReloadGameCodeLib();
 
     if (game_update_and_render_ptr == NULL) {
-      printf("game_update_and_render_ptr is NULL\n");
+      SDL_Log("game_update_and_render_ptr is NULL");
       exit(1);
     }
+
 #endif
 
     last_tick = current_tick;
@@ -776,13 +769,13 @@ int main(int argc, char *argv[]) {
 // Disable input recording and playback for non-DEV builds
 #endif
 
-    // // == DRAW ==
+    // Draw
 
     PlatformUpdateAndDrawFrame(renderer, &destR, tex, &pixel_buffer);
 
-    // // == END DRAW ==
+    // end Draw
 
-    // // == UPDATE ==
+    // Update
 
 #if STATIC_WHOLE_COMPILE
 
@@ -800,9 +793,8 @@ int main(int argc, char *argv[]) {
     new_input = old_input;
     old_input = temp_input_ptr;
 
-    // // == END UPDATE ==
+    // end Update
 
-    // Limit fps
     Uint64 frame_time = SDL_GetTicks() - current_tick;
 
     if (frame_time > 12)
@@ -811,11 +803,9 @@ int main(int argc, char *argv[]) {
     if (frame_time < target_frame_time) {
       SDL_Delay(target_frame_time - frame_time);
     } else {
-      // Missed framerate
       SDL_Log("Failed to hit framerate");
     }
-
-  } // End game loop
+  }
 
   SDL_Quit();
   return 0;

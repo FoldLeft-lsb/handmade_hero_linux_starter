@@ -1,6 +1,6 @@
 #ifndef GAME_H_
 
-#include <SDL3/SDL_stdinc.h>
+#include <stdint.h>
 
 #define Kilobytes(Value) ((Value)*1024LL)
 #define Megabytes(Value) (Kilobytes(Value) * 1024LL)
@@ -22,7 +22,7 @@ typedef struct offscreen_buffer {
   int height;
   int length;
   int bytes_per_px;
-  Uint8 buffer[WIDTH * HEIGHT * BYTES_PER_PX];
+  uint8_t buffer[WIDTH * HEIGHT * BYTES_PER_PX];
 } offscreen_buffer;
 
 typedef struct game_button_state {
@@ -67,25 +67,25 @@ typedef struct game_input {
       game_button_state_t right_click;
     };
   };
-  Uint32 mouseX, mouseY, mouseZ;
+  uint32_t mouseX, mouseY, mouseZ;
 } game_input_t;
 
 typedef struct thread_context {
+  // Nothing yet
 } thread_context_t;
 
 typedef struct game_state {
-  Uint8 alpha;
+  uint8_t alpha;
 } game_state_t;
 
 typedef struct game_memory {
-  bool is_initialized;
-
-  Uint64 permanent_storage_size;
+  uint64_t permanent_storage_size;
   void *permanent_storage;
 
-  Uint64 transient_storage_size;
+  uint64_t transient_storage_size;
   void *transient_storage;
 
+  bool is_initialized;
 } game_memory_t;
 
 typedef void game_init_t(game_memory_t *memory, offscreen_buffer *buff);
@@ -94,16 +94,16 @@ typedef void game_update_and_render_t(thread_context_t *thread,
                                       offscreen_buffer *buff,
                                       game_input_t *input, float delta_time);
 
-// Platform layer File IO
+// Platform layer implements File IO
 
 typedef struct debug_read_file_result {
-  Uint32 contents_size;
+  uint32_t contents_size;
   void *contents;
 } debug_read_file_result_t;
 
 debug_read_file_result_t DEBUGPlatformReadEntireFile(char *filename);
 void DEBUGPlatformFreeFileMemory(void *memory);
-bool DEBUGPlatformWriteEntireFile(char *filename, Uint32 memory_size,
+bool DEBUGPlatformWriteEntireFile(char *filename, uint32_t memory_size,
                                   void *memory);
 
 // end Platform
